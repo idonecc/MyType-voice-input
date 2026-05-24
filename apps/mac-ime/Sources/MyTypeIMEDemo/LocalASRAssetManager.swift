@@ -59,21 +59,21 @@ final class LocalASRAssetManager {
     static let stateDidChangeNotification = Notification.Name("LocalASRAssetManager.stateDidChange")
     static let snapshotUserInfoKey = "snapshot"
 
-    private static let initialPromptSettingKey = SettingsKeys.didRunInitialLocalASRPrompt
-    private static let initialPromptMarkerName = "initial_local_asr_prompt_done.flag"
-    private static let byteCountFormatter: ByteCountFormatter = {
+    nonisolated private static let initialPromptSettingKey = SettingsKeys.didRunInitialLocalASRPrompt
+    nonisolated private static let initialPromptMarkerName = "initial_local_asr_prompt_done.flag"
+    nonisolated(unsafe) private static let byteCountFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         formatter.allowsNonnumericFormatting = false
         return formatter
     }()
 
-    private let settingsStore = UserDefaultsSettingsStore()
-    private let fileManager = FileManager.default
+    nonisolated(unsafe) private let settingsStore = UserDefaultsSettingsStore()
+    nonisolated(unsafe) private let fileManager = FileManager.default
     private var activeOperationID: UUID?
     private var activeStepTitle: String?
     private var lastFailureMessage: String?
-    private var pendingCompletion: ((Result<Snapshot, AssetError>) -> Void)?
+    private var pendingCompletion: (@MainActor (Result<Snapshot, AssetError>) -> Void)?
     private(set) var snapshot = Snapshot(
         kind: .notInstalled,
         source: nil,
@@ -125,7 +125,7 @@ final class LocalASRAssetManager {
         completion?(.failure(.cancelled))
     }
 
-    func beginInstall(pack: LocalModelPack? = nil, completion: ((Result<Snapshot, AssetError>) -> Void)? = nil) {
+    func beginInstall(pack: LocalModelPack? = nil, completion: (@MainActor (Result<Snapshot, AssetError>) -> Void)? = nil) {
         guard activeOperationID == nil else {
             completion?(.failure(.busy))
             return
@@ -177,7 +177,7 @@ final class LocalASRAssetManager {
         }
     }
 
-    func removeUserManagedAssets(completion: ((Result<Snapshot, AssetError>) -> Void)? = nil) {
+    func removeUserManagedAssets(completion: (@MainActor (Result<Snapshot, AssetError>) -> Void)? = nil) {
         guard activeOperationID == nil else {
             completion?(.failure(.busy))
             return
@@ -220,7 +220,7 @@ final class LocalASRAssetManager {
         }
     }
 
-    private func installAssets(operationID: UUID, models: [ASRModelSize] = ASRModelSize.allCases) throws {
+    nonisolated private func installAssets(operationID: UUID, models: [ASRModelSize] = ASRModelSize.allCases) throws {
         guard let rootURL = userManagedRootURL() else {
             throw AssetError.unsupported("无法定位“应用程序支持”目录，暂时不能下载本地模型。")
         }
@@ -299,7 +299,7 @@ final class LocalASRAssetManager {
         }
     }
 
-    private func preferredSeedAssetRootURL() -> URL? {
+    nonisolated private func preferredSeedAssetRootURL() -> URL? {
         let sourceRootURL = FasterWhisperConfiguration.sourcePackageRootURL()
         if isReady(rootURL: sourceRootURL) {
             return sourceRootURL
@@ -311,7 +311,7 @@ final class LocalASRAssetManager {
         return nil
     }
 
-    private func copyDeployableAssets(from sourceRootURL: URL, to destinationRootURL: URL) throws {
+    nonisolated private func copyDeployableAssets(from sourceRootURL: URL, to destinationRootURL: URL) throws {
         let sourceVenvURL = sourceRootURL.appendingPathComponent(".venv", isDirectory: true)
         let sourceModelsURL = sourceRootURL.appendingPathComponent(".models", isDirectory: true)
         let destinationVenvURL = destinationRootURL.appendingPathComponent(".venv", isDirectory: true)
@@ -453,14 +453,14 @@ final class LocalASRAssetManager {
         publish(makeSnapshot())
     }
 
-    private func reportInstallStep(_ title: String, operationID: UUID) {
-        DispatchQueue.main.async { [weak self] in
+    nonisolated private func reportInstallStep(_ title: String, operationID: UUID) {
+        Task { @MainActor [weak self] in
             guard let self, self.activeOperationID == operationID else { return }
             self.setActiveStep(title)
         }
     }
 
-    private func runCommand(
+    nonisolated private func runCommand(
         executablePath: String,
         arguments: [String],
         step: String
@@ -506,11 +506,11 @@ final class LocalASRAssetManager {
         }
     }
 
-    private func hasUsableScript() -> Bool {
+    nonisolated private func hasUsableScript() -> Bool {
         fileManager.fileExists(atPath: FasterWhisperConfiguration.defaultForPackage().scriptURL.path)
     }
 
-    private func bootstrapPythonPath() -> String? {
+    nonisolated private func bootstrapPythonPath() -> String? {
         let candidates = [
             "/usr/bin/python3",
             "/opt/homebrew/bin/python3",
@@ -519,7 +519,7 @@ final class LocalASRAssetManager {
         return candidates.first(where: { fileManager.isExecutableFile(atPath: $0) })
     }
 
-    private func hasInitialPromptMarker() -> Bool {
+    nonisolated private func hasInitialPromptMarker() -> Bool {
         if settingsStore.bool(forKey: Self.initialPromptSettingKey, default: false) {
             return true
         }
@@ -527,7 +527,7 @@ final class LocalASRAssetManager {
         return fileManager.fileExists(atPath: markerURL.path)
     }
 
-    private func initialPromptMarkerURL() -> URL? {
+    nonisolated private func initialPromptMarkerURL() -> URL? {
         guard let rootURL = FasterWhisperConfiguration.applicationSupportASRRootURL(fileManager: fileManager)?
             .deletingLastPathComponent() else {
             return nil
@@ -535,37 +535,37 @@ final class LocalASRAssetManager {
         return rootURL.appendingPathComponent(Self.initialPromptMarkerName)
     }
 
-    private func userManagedRootURL() -> URL? {
+    nonisolated private func userManagedRootURL() -> URL? {
         FasterWhisperConfiguration.applicationSupportASRRootURL(fileManager: fileManager)
     }
 
-    private func hasUserManagedAssets() -> Bool {
+    nonisolated private func hasUserManagedAssets() -> Bool {
         guard let rootURL = userManagedRootURL() else { return false }
         return fileManager.fileExists(atPath: rootURL.path)
     }
 
-    private func isUserManagedReady() -> Bool {
+    nonisolated private func isUserManagedReady() -> Bool {
         guard let rootURL = userManagedRootURL() else { return false }
         return isReady(rootURL: rootURL)
     }
 
-    private func isBundledReady() -> Bool {
+    nonisolated private func isBundledReady() -> Bool {
         guard let rootURL = FasterWhisperConfiguration.bundledASRRootURL() else { return false }
         return isReady(rootURL: rootURL)
     }
 
-    private func isSourcePackageReady() -> Bool {
+    nonisolated private func isSourcePackageReady() -> Bool {
         let rootURL = FasterWhisperConfiguration.sourcePackageRootURL()
         return isReady(rootURL: rootURL)
     }
 
-    private func isReady(rootURL: URL) -> Bool {
+    nonisolated private func isReady(rootURL: URL) -> Bool {
         let pythonPath = rootURL.appendingPathComponent(".venv/bin/python3").path
         let modelsURL = rootURL.appendingPathComponent(".models", isDirectory: true)
         return fileManager.isExecutableFile(atPath: pythonPath) && directoryHasContents(modelsURL)
     }
 
-    private func directoryHasContents(_ url: URL) -> Bool {
+    nonisolated private func directoryHasContents(_ url: URL) -> Bool {
         var isDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return false
@@ -580,13 +580,13 @@ final class LocalASRAssetManager {
         return enumerator.nextObject() != nil
     }
 
-    private func formattedSize(at rootURL: URL?) -> String? {
+    nonisolated private func formattedSize(at rootURL: URL?) -> String? {
         guard let rootURL else { return nil }
         guard let size = directorySize(at: rootURL) else { return nil }
         return Self.byteCountFormatter.string(fromByteCount: size)
     }
 
-    private func directorySize(at rootURL: URL) -> Int64? {
+    nonisolated private func directorySize(at rootURL: URL) -> Int64? {
         guard let enumerator = fileManager.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .isRegularFileKey],
@@ -609,7 +609,7 @@ final class LocalASRAssetManager {
         return total
     }
 
-    private func createProbeAudioFile() throws -> URL {
+    nonisolated private func createProbeAudioFile() throws -> URL {
         let url = fileManager.temporaryDirectory.appendingPathComponent(
             "mytype-local-asr-probe-\(UUID().uuidString).wav"
         )
@@ -646,17 +646,17 @@ final class LocalASRAssetManager {
         return url
     }
 
-    private func appendUInt16(_ value: UInt16, to data: inout Data) {
+    nonisolated private func appendUInt16(_ value: UInt16, to data: inout Data) {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 
-    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+    nonisolated private func appendUInt32(_ value: UInt32, to data: inout Data) {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 
-    private func userFacingMessage(for error: AssetError) -> String {
+    nonisolated private func userFacingMessage(for error: AssetError) -> String {
         switch error {
         case .busy:
             return "已经有一个本地模型任务在执行了，等它完成后再试一次。"
@@ -692,7 +692,7 @@ final class LocalASRAssetManager {
         }
     }
 
-    private func compact(_ text: String, limit: Int = 220) -> String {
+    nonisolated private func compact(_ text: String, limit: Int = 220) -> String {
         let trimmed = text
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
