@@ -1075,6 +1075,8 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
     private let localASRActivityIndicator = NSProgressIndicator(frame: .zero)
     private let localASRPrimaryButton = NSButton(title: "下载本地模型", target: nil, action: nil)
     private let localASRDeleteButton = NSButton(title: "删除本地模型", target: nil, action: nil)
+    private let localASROpenFolderButton = NSButton(title: "打开文件夹", target: nil, action: nil)
+    private let localASRPathLabel = NSTextField(labelWithString: "")
     private let punctuationStylePopup = NSSegmentedControl(
         labels: ["自动", "中文", "English"],
         trackingMode: .selectOne,
@@ -1497,6 +1499,16 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         localASRDeleteButton.action = #selector(deleteLocalASRAssets)
         localASRDeleteButton.controlSize = .small
         localASRDeleteButton.bezelStyle = .rounded
+
+        localASROpenFolderButton.target = self
+        localASROpenFolderButton.action = #selector(openLocalASRAssetsFolder)
+        localASROpenFolderButton.controlSize = .small
+        localASROpenFolderButton.bezelStyle = .rounded
+
+        localASRPathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        localASRPathLabel.textColor = .secondaryLabelColor
+        localASRPathLabel.lineBreakMode = .byTruncatingMiddle
+        localASRPathLabel.maximumNumberOfLines = 1
         styleSecondaryButton(localASRDeleteButton)
 
         punctuationStylePopup.target = self
@@ -2545,7 +2557,7 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         buttonSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         buttonSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let buttonRow = NSStackView(views: [localASRPrimaryButton, localASRDeleteButton, buttonSpacer])
+        let buttonRow = NSStackView(views: [localASRPrimaryButton, localASRDeleteButton, localASROpenFolderButton, buttonSpacer])
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
         buttonRow.spacing = 8
@@ -2554,6 +2566,7 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         let body = NSStackView(views: [
             statusRow,
             localASRDetailLabel,
+            localASRPathLabel,
             buttonRow,
             makeInfoHintLabel("本地模型只下载到当前这台 Mac。删除后不会影响你已经保存的云端 API 设置。")
         ])
@@ -2563,6 +2576,7 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         body.translatesAutoresizingMaskIntoConstraints = false
         statusRow.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         localASRDetailLabel.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
+        localASRPathLabel.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         buttonRow.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         localASRActivityIndicator.widthAnchor.constraint(equalToConstant: 14).isActive = true
         localASRActivityIndicator.heightAnchor.constraint(equalToConstant: 14).isActive = true
@@ -2593,6 +2607,8 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         localASRPrimaryButton.isEnabled = snapshot.canStartInstall
         localASRDeleteButton.isHidden = !snapshot.canDelete
         localASRDeleteButton.isEnabled = snapshot.canDelete && !snapshot.showsActivity
+        localASRPathLabel.stringValue = "📂 " + LocalASRAssetManager.shared.assetsFolderDisplayPath()
+        localASROpenFolderButton.isEnabled = !snapshot.showsActivity
 
         switch snapshot.kind {
         case .ready:
@@ -3292,6 +3308,16 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
     private func reapplyPermissionsTapped() {
         onReapplyPermissions()
         showTransientSuccessMessage("已触发权限申请", anchorView: reapplyPermissionsButton)
+    }
+
+    @objc
+    private func openLocalASRAssetsFolder() {
+        guard let url = LocalASRAssetManager.shared.assetsFolderURL() else {
+            NSSound.beep()
+            return
+        }
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     @objc

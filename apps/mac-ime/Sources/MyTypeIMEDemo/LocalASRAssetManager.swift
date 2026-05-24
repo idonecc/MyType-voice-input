@@ -539,6 +539,20 @@ final class LocalASRAssetManager {
         FasterWhisperConfiguration.applicationSupportASRRootURL(fileManager: fileManager)
     }
 
+    nonisolated func assetsFolderURL() -> URL? {
+        userManagedRootURL()
+    }
+
+    nonisolated func assetsFolderDisplayPath() -> String {
+        guard let url = userManagedRootURL() else { return "（路径不可用）" }
+        let home = NSHomeDirectory()
+        let path = url.path
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
     nonisolated private func hasUserManagedAssets() -> Bool {
         guard let rootURL = userManagedRootURL() else { return false }
         return fileManager.fileExists(atPath: rootURL.path)

@@ -111,12 +111,12 @@ public struct FasterWhisperConfiguration: Sendable {
     }
 
     public static func applicationSupportASRRootURL(fileManager: FileManager = .default) -> URL? {
-        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
+        if let override = ProcessInfo.processInfo.environment["MYTYPE_ASR_ROOT"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
-        return appSupportURL
+        return fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("models", isDirectory: true)
             .appendingPathComponent("MyType", isDirectory: true)
-            .appendingPathComponent("ASR", isDirectory: true)
     }
 
     private static func resolvedScriptURL(
