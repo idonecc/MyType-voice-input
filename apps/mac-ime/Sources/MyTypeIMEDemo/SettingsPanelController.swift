@@ -1077,6 +1077,13 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
     private let localASRDeleteButton = NSButton(title: "删除本地模型", target: nil, action: nil)
     private let localASROpenFolderButton = NSButton(title: "打开文件夹", target: nil, action: nil)
     private let localASRPathLabel = NSTextField(labelWithString: "")
+    private struct LocalASRModelRowControls {
+        let statusLabel: NSTextField
+        let downloadButton: NSButton
+        let switchButton: NSButton
+        let deleteButton: NSButton
+    }
+    private var localASRModelRows: [ASRModelSize: LocalASRModelRowControls] = [:]
     private let punctuationStylePopup = NSSegmentedControl(
         labels: ["自动", "中文", "English"],
         trackingMode: .selectOne,
@@ -2540,8 +2547,6 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         localASRActivityIndicator.translatesAutoresizingMaskIntoConstraints = false
         localASRStatusLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         localASRStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        localASRPrimaryButton.setContentHuggingPriority(.required, for: .horizontal)
-        localASRDeleteButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let statusSpacer = NSView()
         statusSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -2553,22 +2558,22 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         statusRow.spacing = 8
         statusRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let buttonSpacer = NSView()
-        buttonSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        buttonSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let pathSpacer = NSView()
+        pathSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let pathRow = NSStackView(views: [localASRPathLabel, pathSpacer, localASROpenFolderButton])
+        pathRow.orientation = .horizontal
+        pathRow.alignment = .centerY
+        pathRow.spacing = 8
+        pathRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let buttonRow = NSStackView(views: [localASRPrimaryButton, localASRDeleteButton, localASROpenFolderButton, buttonSpacer])
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+        let modelListView = makeLocalASRModelListView()
 
         let body = NSStackView(views: [
             statusRow,
             localASRDetailLabel,
-            localASRPathLabel,
-            buttonRow,
-            makeInfoHintLabel("本地模型只下载到当前这台 Mac。删除后不会影响你已经保存的云端 API 设置。")
+            pathRow,
+            modelListView,
+            makeInfoHintLabel("每个模型可以单独下载、切换或删除。「切换」会把语音识别即时换到该档；删除当前使用中的档会自动回退到下一档。")
         ])
         body.orientation = .vertical
         body.alignment = .leading
@@ -2576,12 +2581,76 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         body.translatesAutoresizingMaskIntoConstraints = false
         statusRow.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         localASRDetailLabel.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
-        localASRPathLabel.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
-        buttonRow.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
+        pathRow.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
+        modelListView.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         localASRActivityIndicator.widthAnchor.constraint(equalToConstant: 14).isActive = true
         localASRActivityIndicator.heightAnchor.constraint(equalToConstant: 14).isActive = true
 
         return makeSectionCard(title: "本地模型", content: body)
+    }
+
+    private func makeLocalASRModelListView() -> NSStackView {
+        let rows: [NSView] = ASRModelSize.allCases.enumerated().map { (idx, size) in
+            makeLocalASRModelRow(size: size, tag: idx)
+        }
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    private func makeLocalASRModelRow(size: ASRModelSize, tag: Int) -> NSView {
+        let nameLabel = NSTextField(labelWithString: size.rawValue)
+        nameLabel.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+        let descLabel = NSTextField(labelWithString: describe(size))
+        descLabel.font = .systemFont(ofSize: 11)
+        descLabel.textColor = .secondaryLabelColor
+
+        let statusBadge = NSTextField(labelWithString: "")
+        statusBadge.font = .systemFont(ofSize: 11, weight: .medium)
+        statusBadge.textColor = .secondaryLabelColor
+
+        let downloadBtn = NSButton(title: "下载", target: self, action: #selector(downloadLocalASRModel(_:)))
+        downloadBtn.tag = tag
+        downloadBtn.controlSize = .small
+        downloadBtn.bezelStyle = .rounded
+
+        let switchBtn = NSButton(title: "切换", target: self, action: #selector(switchToLocalASRModel(_:)))
+        switchBtn.tag = tag
+        switchBtn.controlSize = .small
+        switchBtn.bezelStyle = .rounded
+
+        let deleteBtn = NSButton(title: "删除", target: self, action: #selector(removeLocalASRModel(_:)))
+        deleteBtn.tag = tag
+        deleteBtn.controlSize = .small
+        deleteBtn.bezelStyle = .rounded
+
+        localASRModelRows[size] = LocalASRModelRowControls(
+            statusLabel: statusBadge,
+            downloadButton: downloadBtn,
+            switchButton: switchBtn,
+            deleteButton: deleteBtn
+        )
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [nameLabel, descLabel, spacer, statusBadge, downloadBtn, switchBtn, deleteBtn])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
+        return row
+    }
+
+    private func describe(_ size: ASRModelSize) -> String {
+        switch size {
+        case .tiny:  return "约 77 MB · 极快（质量一般）"
+        case .base:  return "约 148 MB · 快"
+        case .small: return "约 488 MB · 均衡（推荐）"
+        }
     }
 
     private func observeLocalASRState() {
@@ -2632,6 +2701,96 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
             localASRActivityIndicator.startAnimation(nil)
         } else {
             localASRActivityIndicator.stopAnimation(nil)
+        }
+
+        refreshLocalASRModelRows(snapshot: snapshot)
+    }
+
+    private func refreshLocalASRModelRows(snapshot: LocalASRAssetManager.Snapshot) {
+        let activeRaw = settings.string(forKey: SettingsKeys.asrModel, default: ASRModelSize.small.rawValue)
+        let activeModel = ASRModelSize(rawValue: activeRaw) ?? .small
+        let busy = snapshot.showsActivity
+
+        for size in ASRModelSize.allCases {
+            guard let controls = localASRModelRows[size] else { continue }
+            let installed = LocalASRAssetManager.shared.hasModel(size)
+            let isActive = installed && size == activeModel
+
+            if isActive {
+                controls.statusLabel.stringValue = "使用中"
+                controls.statusLabel.textColor = NSColor(calibratedRed: 0.15, green: 0.58, blue: 0.29, alpha: 1)
+            } else if installed {
+                controls.statusLabel.stringValue = "已安装"
+                controls.statusLabel.textColor = .secondaryLabelColor
+            } else {
+                controls.statusLabel.stringValue = "未安装"
+                controls.statusLabel.textColor = .tertiaryLabelColor
+            }
+
+            controls.downloadButton.isHidden = installed
+            controls.downloadButton.isEnabled = !installed && !busy
+
+            controls.switchButton.isHidden = !installed || isActive
+            controls.switchButton.isEnabled = installed && !isActive && !busy
+
+            controls.deleteButton.isHidden = !installed
+            controls.deleteButton.isEnabled = installed && !busy
+        }
+
+        // 顶部 modelPopup 防呆：未下载的档 disable
+        for (idx, size) in ASRModelSize.allCases.enumerated() {
+            modelPopup.setEnabled(LocalASRAssetManager.shared.hasModel(size), forSegment: idx)
+        }
+    }
+
+    @objc
+    private func downloadLocalASRModel(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < ASRModelSize.allCases.count else { return }
+        let size = ASRModelSize.allCases[sender.tag]
+        LocalASRAssetManager.shared.beginInstall(models: [size]) { [weak self] result in
+            switch result {
+            case .success:
+                self?.showTransientSuccessMessage("\(size.rawValue) 模型已安装", anchorView: sender)
+            case .failure(let error):
+                self?.presentLocalASRActionAlert(
+                    title: "下载 \(size.rawValue) 失败",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    @objc
+    private func switchToLocalASRModel(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < ASRModelSize.allCases.count else { return }
+        let size = ASRModelSize.allCases[sender.tag]
+        settings.set(size.rawValue, forKey: SettingsKeys.asrModel)
+        onModelChanged(size)
+        modelPopup.selectedSegment = index(for: size)
+        refreshLocalASRModelRows(snapshot: LocalASRAssetManager.shared.snapshot)
+        showTransientSuccessMessage("已切换到 \(size.rawValue)", anchorView: sender)
+    }
+
+    @objc
+    private func removeLocalASRModel(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < ASRModelSize.allCases.count else { return }
+        let size = ASRModelSize.allCases[sender.tag]
+        let alert = NSAlert()
+        alert.messageText = "删除 \(size.rawValue) 模型"
+        alert.informativeText = "删除后该档位需要重新下载。词库和云端 API 配置不受影响。"
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        LocalASRAssetManager.shared.removeModel(size) { [weak self] result in
+            switch result {
+            case .success:
+                self?.showTransientSuccessMessage("\(size.rawValue) 模型已删除", anchorView: sender)
+            case .failure(let error):
+                self?.presentLocalASRActionAlert(
+                    title: "删除 \(size.rawValue) 失败",
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 
@@ -3579,8 +3738,10 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         switch model {
         case .tiny:
             return 0
-        case .small:
+        case .base:
             return 1
+        case .small:
+            return 2
         }
     }
 
@@ -3588,6 +3749,8 @@ final class SettingsPanelController: NSWindowController, NSWindowDelegate {
         switch index {
         case 0:
             return .tiny
+        case 1:
+            return .base
         default:
             return .small
         }

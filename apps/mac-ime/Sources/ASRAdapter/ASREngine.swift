@@ -224,6 +224,7 @@ public struct FasterWhisperConfiguration: Sendable {
 
 public enum ASRModelSize: String, CaseIterable, Sendable {
     case tiny
+    case base
     case small
 }
 

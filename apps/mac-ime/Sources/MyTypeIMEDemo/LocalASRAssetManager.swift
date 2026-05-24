@@ -125,7 +125,11 @@ final class LocalASRAssetManager {
         completion?(.failure(.cancelled))
     }
 
-    func beginInstall(pack: LocalModelPack? = nil, completion: (@MainActor (Result<Snapshot, AssetError>) -> Void)? = nil) {
+    func beginInstall(
+        pack: LocalModelPack? = nil,
+        models: [ASRModelSize]? = nil,
+        completion: (@MainActor (Result<Snapshot, AssetError>) -> Void)? = nil
+    ) {
         guard activeOperationID == nil else {
             completion?(.failure(.busy))
             return
@@ -137,7 +141,7 @@ final class LocalASRAssetManager {
         pendingCompletion = completion
         setActiveStep("正在准备本地识别环境…")
 
-        let requestedModels = pack?.requestedModels ?? ASRModelSize.allCases
+        let requestedModels = models ?? pack?.requestedModels ?? ASRModelSize.allCases
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
@@ -233,6 +237,36 @@ final class LocalASRAssetManager {
         let venvURL = rootURL.appendingPathComponent(".venv", isDirectory: true)
         let modelsURL = rootURL.appendingPathComponent(".models", isDirectory: true)
         let venvPython = venvURL.appendingPathComponent("bin/python3")
+
+        // Incremental install: when venv is already healthy, skip the
+        // teardown + venv recreate + pip install (~2 min) and jump
+        // straight to downloading the requested model(s). Lets users
+        // add a 4th model on top of 3 existing ones without nuking
+        // everything. HF cache dedup means re-requesting an already
+        // downloaded model is a no-op.
+        if fileManager.isExecutableFile(atPath: venvPython.path) {
+            try fileManager.createDirectory(at: modelsURL, withIntermediateDirectories: true)
+            let probeAudioURL = try createProbeAudioFile()
+            defer { try? fileManager.removeItem(at: probeAudioURL) }
+            for model in models {
+                reportInstallStep("正在下载 \(model.rawValue) 模型…", operationID: operationID)
+                try runCommand(
+                    executablePath: venvPython.path,
+                    arguments: [
+                        scriptURL.path,
+                        "--audio", probeAudioURL.path,
+                        "--model", model.rawValue,
+                        "--device", "auto",
+                        "--compute-type", "int8",
+                        "--beam-size", "1",
+                        "--model-dir", modelsURL.path,
+                        "--chinese-script", "simplified"
+                    ],
+                    step: "下载 \(model.rawValue) 模型"
+                )
+            }
+            return
+        }
 
         reportInstallStep("正在清理旧的本地模型…", operationID: operationID)
         if fileManager.fileExists(atPath: rootURL.path) {
@@ -541,6 +575,77 @@ final class LocalASRAssetManager {
 
     nonisolated func assetsFolderURL() -> URL? {
         userManagedRootURL()
+    }
+
+    // Per-model status / removal. The HuggingFace cache writes one
+    // `models--Systran--faster-whisper-<size>/` directory + a parallel
+    // entry under `.locks/` — both get cleared on removeModel so
+    // downloading later starts fresh.
+    nonisolated func hasModel(_ size: ASRModelSize) -> Bool {
+        guard let dir = modelCacheDirectoryURL(for: size) else { return false }
+        return directoryHasContents(dir)
+    }
+
+    func removeModel(
+        _ size: ASRModelSize,
+        completion: (@MainActor (Result<Snapshot, AssetError>) -> Void)? = nil
+    ) {
+        guard activeOperationID == nil else {
+            completion?(.failure(.busy))
+            return
+        }
+        guard let dir = modelCacheDirectoryURL(for: size),
+              let lockDir = modelLockDirectoryURL(for: size) else {
+            completion?(.failure(.unsupported("找不到 MyType 的本地数据目录。")))
+            return
+        }
+        let operationID = UUID()
+        activeOperationID = operationID
+        lastFailureMessage = nil
+        setActiveStep("正在删除 \(size.rawValue) 模型…")
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            do {
+                if self.fileManager.fileExists(atPath: dir.path) {
+                    try self.fileManager.removeItem(at: dir)
+                }
+                if self.fileManager.fileExists(atPath: lockDir.path) {
+                    try? self.fileManager.removeItem(at: lockDir)
+                }
+                Task { @MainActor in
+                    guard self.activeOperationID == operationID else { return }
+                    self.activeOperationID = nil
+                    self.activeStepTitle = nil
+                    self.lastFailureMessage = nil
+                    self.refreshStatus()
+                    completion?(.success(self.snapshot))
+                }
+            } catch {
+                let wrapped = AssetError.fileOperation(error.localizedDescription)
+                Task { @MainActor in
+                    guard self.activeOperationID == operationID else { return }
+                    self.activeOperationID = nil
+                    self.activeStepTitle = nil
+                    self.lastFailureMessage = self.userFacingMessage(for: wrapped)
+                    self.refreshStatus()
+                    completion?(.failure(wrapped))
+                }
+            }
+        }
+    }
+
+    nonisolated private func modelCacheDirectoryURL(for size: ASRModelSize) -> URL? {
+        userManagedRootURL()?
+            .appendingPathComponent(".models", isDirectory: true)
+            .appendingPathComponent("models--Systran--faster-whisper-\(size.rawValue)", isDirectory: true)
+    }
+
+    nonisolated private func modelLockDirectoryURL(for size: ASRModelSize) -> URL? {
+        userManagedRootURL()?
+            .appendingPathComponent(".models", isDirectory: true)
+            .appendingPathComponent(".locks", isDirectory: true)
+            .appendingPathComponent("models--Systran--faster-whisper-\(size.rawValue)", isDirectory: true)
     }
 
     nonisolated func assetsFolderDisplayPath() -> String {
